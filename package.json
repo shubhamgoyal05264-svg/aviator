@@ -1,0 +1,11 @@
+{
+    "name": "skyhigh-crash",
+    "private": true,
+    "scripts": {
+        "dev:client": "npm run dev --prefix client",
+        "dev:server": "npm run dev --prefix server",
+        "dev:admin": "npm run dev --prefix admin",
+        "dev": "start \"SkyHigh Server\" cmd /k \"cd server && npm run dev\" && start \"SkyHigh Client\" cmd /k \"cd client && npm run dev\" && start \"SkyHigh Admin\" cmd /k \"cd admin && npm run dev\"",
+        "install:all": "npm i --prefix client && npm i --prefix server && npm i --prefix admin"
+    }
+}
