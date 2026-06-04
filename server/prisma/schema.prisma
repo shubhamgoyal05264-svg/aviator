@@ -22,8 +22,47 @@ model User {
   created_at    DateTime @default(now())
   updated_at    DateTime @updatedAt
 
+  // Provider / seamless-wallet players belong to an external operator. For these
+  // users `real_balance` is only a cached mirror — the operator wallet is authoritative.
+  operator_id        String?  @db.Uuid
+  external_player_id String?
+  operator           Operator? @relation(fields: [operator_id], references: [id])
+
   bets          Bet[]
   transactions  Transaction[]
+  sessions      GameSession[]
+
+  @@unique([operator_id, external_player_id])
+}
+
+// An integrated operator (a project/casino) that embeds this game and owns its
+// own players + wallet. We never hold their money; we call their seamless API.
+model Operator {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name         String   @unique
+  secret_key   String                              // HMAC secret used to sign wallet callbacks
+  callback_url String                              // base URL of the operator's seamless wallet API
+  currencies   String   @default("USD") @db.VarChar(120) // comma-separated allowed currency codes
+  active       Int      @default(1)
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+
+  players      User[]
+  sessions     GameSession[]
+}
+
+// A launched play session for an operator player (created at /provider/launch).
+model GameSession {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  operator_id  String   @db.Uuid
+  user_id      String   @db.Uuid
+  currency     String   @db.VarChar(10)
+  launch_token String                              // original short-lived token from the operator
+  active       Int      @default(1)
+  created_at   DateTime @default(now())
+
+  operator     Operator @relation(fields: [operator_id], references: [id])
+  user         User     @relation(fields: [user_id], references: [id])
 }
 
 model Round {

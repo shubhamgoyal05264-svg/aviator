@@ -1,0 +1,212 @@
+/* Full-viewport app shell (Spribe-style) */
+html,
+body,
+#root {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+.app-shell {
+  height: 100dvh;
+  max-height: 100dvh;
+}
+
+@supports not (height: 100dvh) {
+  .app-shell {
+    height: 100vh;
+    max-height: 100vh;
+  }
+}
+
+.game-main {
+  flex: 1 1 auto;
+}
+
+.game-stage {
+  isolation: isolate;
+}
+
+.bet-panels {
+  max-height: min(42vh, 220px);
+}
+
+@media (min-width: 1024px) {
+  .bet-panels {
+    max-height: none;
+  }
+
+  .sidebar-panel {
+    max-height: none;
+  }
+}
+
+.safe-area-pb {
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom, 0px));
+}
+
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: #2d2d2d transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 4px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: #2d2d2d;
+  border-radius: 4px;
+}
+
+/* Spribe Aviator–style global tokens */
+:root {
+  --aviator-red: #e50539;
+  --aviator-red-dark: #b8042e;
+  --aviator-bg: #0b0e11;
+  --aviator-panel: #1b1c1d;
+  --aviator-panel-2: #141516;
+  --aviator-border: #2d2d2d;
+  --aviator-green: #28a909;
+  --aviator-green-hover: #36cb12;
+  --aviator-yellow: #ffc107;
+  --aviator-purple: #913ef8;
+  --aviator-blue: #34b4ff;
+}
+
+.font-inter {
+  font-family: 'Inter', sans-serif;
+}
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* History multiplier pills */
+.history-pill {
+  flex-shrink: 0;
+  min-width: 3.25rem;
+  padding: 0.35rem 0.65rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-align: center;
+  cursor: default;
+  transition: transform 0.15s;
+}
+.history-pill:hover {
+  transform: scale(1.05);
+}
+.history-pill--low {
+  background: #2d2d2d;
+  color: #9ca3af;
+}
+.history-pill--mid {
+  background: var(--aviator-blue);
+  color: #fff;
+}
+.history-pill--high {
+  background: var(--aviator-purple);
+  color: #fff;
+}
+
+/* Bet panel tabs */
+.bet-tab {
+  flex: 1;
+  padding: 0.5rem 0;
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #6b7280;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+}
+.bet-tab--active {
+  color: #fff;
+  border-bottom-color: var(--aviator-red);
+}
+
+/* Amount stepper */
+.amount-stepper-btn {
+  width: 2.25rem;
+  height: 2.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  background: #2d2d2d;
+  color: #fff;
+  font-size: 1.25rem;
+  font-weight: 700;
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+.amount-stepper-btn:hover:not(:disabled) {
+  background: #3d3d3d;
+}
+.amount-stepper-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* Primary bet button */
+.btn-bet {
+  background: var(--aviator-green);
+  color: #fff;
+  font-weight: 800;
+  transition: background 0.15s, transform 0.1s;
+}
+.btn-bet:hover:not(:disabled) {
+  background: var(--aviator-green-hover);
+}
+.btn-bet:active:not(:disabled) {
+  transform: scale(0.98);
+}
+.btn-bet:disabled {
+  background: #2d2d2d;
+  color: #6b7280;
+  cursor: not-allowed;
+}
+
+.btn-cashout {
+  background: var(--aviator-yellow);
+  color: #000;
+  font-weight: 800;
+  transition: background 0.15s, transform 0.1s;
+}
+.btn-cashout:hover:not(:disabled) {
+  background: #e0a800;
+}
+.btn-cashout:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+/* FUN MODE banner (matches Spribe .fun-mode element) */
+.fun-mode {
+  text-align: center;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: #ffffff;
+  padding: 4px 0;
+  background: linear-gradient(180deg, #e6a817 0%, #c8890e 50%, #a86f08 100%);
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.35);
+  flex-shrink: 0;
+}
+
+/* Aviator logo */
+.aviator-logo {
+  font-style: italic;
+  font-weight: 900;
+  font-size: 1.35rem;
+  letter-spacing: -0.02em;
+  color: var(--aviator-red);
+  text-transform: capitalize;
+}

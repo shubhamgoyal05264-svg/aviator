@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import { prisma } from './prisma';
 import { generateCrashPoint, generateRandomSeed, sha256, applyHoneymoonBias } from './provablyFair';
 import { PlaceBetSchema } from './validators';
+import * as wallet from './provider/walletService';
 
 export const gameConfig = {
     bettingDuration: 8000,
@@ -25,6 +26,9 @@ interface ActiveBet {
     cashoutMultiplier?: number;
     cashoutAmount?: number;
     isBot: boolean;
+    // Seamless-wallet context (operator-backed players only)
+    operatorId?: string | null;
+    externalPlayerId?: string | null;
 }
 
 interface RoundState {
@@ -60,9 +64,24 @@ export class GameEngine {
 
         if (token) {
             try {
-                const payload = jwt.verify(token, process.env.JWT_SECRET!) as { userId: string };
+                const payload = jwt.verify(token, process.env.JWT_SECRET!) as { userId: string; sessionId?: string; operatorId?: string };
                 userId = payload.userId;
                 socket.data.userId = userId;
+                socket.join(`user:${userId}`);
+                if (payload.sessionId) {
+                    socket.data.sessionId = payload.sessionId;
+                    // Resolve the operator-backed player context for seamless wallet calls.
+                    prisma.gameSession.findUnique({
+                        where: { id: payload.sessionId },
+                        include: { user: { select: { operator_id: true, external_player_id: true } } },
+                    }).then((s: any) => {
+                        if (s) {
+                            socket.data.currency = s.currency;
+                            socket.data.operatorId = s.user.operator_id;
+                            socket.data.externalPlayerId = s.user.external_player_id;
+                        }
+                    }).catch(() => {});
+                }
             } catch { /* anonymous */ }
         }
 
@@ -91,45 +110,47 @@ export class GameEngine {
                 return;
             }
 
-            const { slot, amount, currency, autoCashout } = validatedData;
+            const { slot, amount, autoCashout } = validatedData;
+            // Operator players bet in their session currency; internal players use REAL.
+            const operatorId = socket.data.operatorId as string | null | undefined;
+            const externalPlayerId = socket.data.externalPlayerId as string | null | undefined;
+            const currency = (socket.data.currency as string) || validatedData.currency || 'REAL';
             const betKey = `${userId}-${slot}`;
             if (this.round.bets.has(betKey)) { socket.emit('error', { message: 'Bet already placed for this slot' }); return; }
 
             try {
                 const betId = uuidv4();
+                const u = await prisma.user.findUnique({ where: { id: userId } });
+                if (!u) throw new Error('User not found');
 
-                const user = await prisma.$transaction(async (tx: any) => {
-                    const u = await tx.user.findUnique({ where: { id: userId } });
-                    if (!u) throw new Error('User not found');
+                const { balance } = await wallet.debit(
+                    { id: u.id, operator_id: u.operator_id, external_player_id: u.external_player_id },
+                    amount,
+                    { roundId: this.round.id, txId: betId, currency }
+                );
 
-                    const balance = currency === 'REAL' ? u.real_balance.toNumber() : u.demo_balance.toNumber();
-                    if (balance < amount) throw new Error('Insufficient balance');
-
-                    const updatedUser = await tx.user.update({
-                        where: { id: userId },
-                        data: currency === 'REAL' ? { real_balance: { decrement: amount } } : { demo_balance: { decrement: amount } }
-                    });
-
-                    await tx.bet.create({
-                        data: {
-                            id: betId,
-                            round_id: this.round!.id,
-                            user_id: userId,
-                            slot,
-                            amount,
-                            currency,
-                            auto_cashout: autoCashout,
-                            timestamp: new Date()
-                        }
-                    });
-
-                    return updatedUser;
+                await prisma.bet.create({
+                    data: {
+                        id: betId,
+                        round_id: this.round.id,
+                        user_id: userId,
+                        slot,
+                        amount,
+                        currency,
+                        auto_cashout: autoCashout,
+                        timestamp: new Date(),
+                    },
                 });
 
-                const bet: ActiveBet = { id: betId, userId, username: user.username, slot, amount, currency, autoCashout, cashedOut: false, isBot: false };
+                const bet: ActiveBet = {
+                    id: betId, userId, username: u.username, slot, amount, currency, autoCashout,
+                    cashedOut: false, isBot: false,
+                    operatorId: u.operator_id, externalPlayerId: u.external_player_id,
+                };
                 this.round.bets.set(betKey, bet);
 
-                this.io.emit('bet:placed', { id: betId, user: user.username, slot, amount, currency, autoCashout, isBot: false });
+                this.io.to(`user:${userId}`).emit('wallet:balance', { balance, currency });
+                this.io.emit('bet:placed', { id: betId, user: u.username, slot, amount, currency, autoCashout, isBot: false });
             } catch (e: any) {
                 socket.emit('error', { message: e.message || 'Bet failed' });
             }
@@ -156,15 +177,23 @@ export class GameEngine {
         bet.cashoutMultiplier = mult;
         bet.cashoutAmount = winAmount;
 
-        // Async update to DB
-        prisma.$transaction(async (tx: any) => {
-            const data = bet.currency === 'REAL' ? { real_balance: { increment: winAmount } } : { demo_balance: { increment: winAmount } };
-            await tx.user.update({ where: { id: userId }, data });
-            await tx.bet.update({
+        // Credit the win via the wallet layer (internal balance or operator seamless API).
+        (async () => {
+            try {
+                const { balance } = await wallet.credit(
+                    { id: userId, operator_id: bet.operatorId, external_player_id: bet.externalPlayerId },
+                    winAmount,
+                    { roundId: this.round!.id, txId: uuidv4(), refTxId: bet.id, currency: bet.currency }
+                );
+                this.io.to(`user:${userId}`).emit('wallet:balance', { balance, currency: bet.currency });
+            } catch (err) {
+                console.error('Cashout credit error:', err);
+            }
+            await prisma.bet.update({
                 where: { id: bet.id },
-                data: { multiplier: mult, cashout_amount: winAmount }
-            });
-        }).catch(err => console.error('Cashout DB Error:', err));
+                data: { multiplier: mult, cashout_amount: winAmount },
+            }).catch((err) => console.error('Cashout DB Error:', err));
+        })();
 
         this.io.emit('bet:cashedout', { betId: bet.id, user: bet.username, slot, multiplier: mult, cashoutAmount: winAmount });
         return true;

@@ -40,11 +40,11 @@ export const AuthView: React.FC<Props> = ({ onLogin }) => {
   };
 
   return (
-    <div className="min-h-screen bg-[#0d0d0d] flex items-center justify-center p-6 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-aviator-red/10 via-[#0d0d0d] to-[#0d0d0d]">
-      <div className="w-full max-w-md bg-[#141516] rounded-3xl border border-white/5 p-8 shadow-2xl">
+    <div className="h-dvh max-h-dvh w-full bg-[#0b0e11] flex items-center justify-center p-4 sm:p-6 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-[#e50539]/10 via-[#0b0e11] to-[#0b0e11] overflow-auto">
+      <div className="w-full max-w-md bg-[#141516] rounded-3xl border border-[#2d2d2d] p-8 shadow-2xl">
         <div className="text-center mb-10">
-          <h1 className="text-4xl font-black italic text-aviator-red tracking-tighter mb-2">SKYHIGH</h1>
-          <p className="text-gray-500 text-sm font-medium">Global Crash Gaming Network</p>
+          <h1 className="text-4xl font-black italic text-[#e50539] tracking-tighter mb-2">Aviator</h1>
+          <p className="text-gray-500 text-sm font-medium">Provably Fair Crash Game</p>
         </div>
 
         {error && (
@@ -62,7 +62,7 @@ export const AuthView: React.FC<Props> = ({ onLogin }) => {
                 type="text"
                 value={username}
                 onChange={e => setUsername(e.target.value)}
-                className="w-full bg-[#0d0d0d] border border-white/5 rounded-xl px-4 py-3 focus:outline-none focus:border-aviator-red transition-all"
+                className="w-full bg-[#0f1012] border border-[#2d2d2d] rounded-xl px-4 py-3 focus:outline-none focus:border-[#e50539] transition-all"
                 placeholder="SkyPilot_77"
               />
             </div>
@@ -74,7 +74,7 @@ export const AuthView: React.FC<Props> = ({ onLogin }) => {
               type="email"
               value={email}
               onChange={e => setEmail(e.target.value)}
-              className="w-full bg-[#0d0d0d] border border-white/5 rounded-xl px-4 py-3 focus:outline-none focus:border-aviator-red transition-all"
+              className="w-full bg-[#0f1012] border border-[#2d2d2d] rounded-xl px-4 py-3 focus:outline-none focus:border-[#e50539] transition-all"
               placeholder="pilot@skyhigh.com"
             />
           </div>
@@ -85,7 +85,7 @@ export const AuthView: React.FC<Props> = ({ onLogin }) => {
               type="password"
               value={password}
               onChange={e => setPassword(e.target.value)}
-              className="w-full bg-[#0d0d0d] border border-white/5 rounded-xl px-4 py-3 focus:outline-none focus:border-aviator-red transition-all"
+              className="w-full bg-[#0f1012] border border-[#2d2d2d] rounded-xl px-4 py-3 focus:outline-none focus:border-[#e50539] transition-all"
               placeholder="••••••••"
             />
           </div>
@@ -93,7 +93,7 @@ export const AuthView: React.FC<Props> = ({ onLogin }) => {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-aviator-red py-4 rounded-xl font-black text-lg hover:brightness-110 active:scale-[0.98] transition-all shadow-[0_4px_20px_rgba(229,30,37,0.3)] flex items-center justify-center gap-3"
+            className="w-full bg-[#e50539] py-4 rounded-xl font-black text-lg hover:brightness-110 active:scale-[0.98] transition-all shadow-[0_4px_20px_rgba(229,5,57,0.3)] flex items-center justify-center gap-3 disabled:opacity-70"
           >
             {loading
               ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />

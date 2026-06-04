@@ -7,6 +7,7 @@ import { prisma } from './prisma';
 import authRouter from './auth';
 import walletRouter from './wallet';
 import adminRouter from './admin';
+import providerRouter from './provider/launch';
 import { GameEngine } from './game';
 
 async function main() {
@@ -22,6 +23,7 @@ async function main() {
     app.use('/api/auth', authRouter);
     app.use('/api/wallet', walletRouter);
     app.use('/api/admin', adminRouter);
+    app.use('/api/provider', providerRouter);
     app.get('/api/health', (_req, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
 
     let ioOptions: ConstructorParameters<typeof IOServer>[1] = {

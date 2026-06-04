@@ -2,9 +2,60 @@ import { Router, Response } from 'express';
 import { prisma } from './prisma';
 import { requireAdmin, AuthRequest } from './middleware';
 import { gameConfig } from './game';
+import { newSecret } from './provider/signature';
 
 const router = Router();
 router.use(requireAdmin as any);
+
+// ─── Operators (provider integrations) ──────────────────────────────────────────
+router.get('/operators', async (_req, res: Response) => {
+    const operators = await prisma.operator.findMany({ orderBy: { created_at: 'desc' } });
+    const data = await Promise.all(operators.map(async (op: any) => ({
+        id: op.id,
+        name: op.name,
+        secret_key: op.secret_key,
+        callback_url: op.callback_url,
+        currencies: op.currencies,
+        active: op.active,
+        created_at: op.created_at,
+        players: await prisma.user.count({ where: { operator_id: op.id } }),
+    })));
+    res.json({ operators: data });
+});
+
+router.post('/operators', async (req: AuthRequest, res: Response): Promise<void> => {
+    const { name, callback_url, currencies } = req.body;
+    if (!name || !callback_url) { res.status(400).json({ error: 'name and callback_url are required' }); return; }
+    try {
+        const operator = await prisma.operator.create({
+            data: {
+                name: String(name),
+                callback_url: String(callback_url),
+                currencies: currencies ? String(currencies) : 'USD',
+                secret_key: newSecret(),
+            },
+        });
+        res.status(201).json({ operator });
+    } catch (e: any) {
+        res.status(409).json({ error: e?.code === 'P2002' ? 'Operator name already exists' : (e.message || 'Create failed') });
+    }
+});
+
+router.patch('/operators/:id', async (req: AuthRequest, res: Response): Promise<void> => {
+    const { id } = req.params;
+    const { callback_url, currencies, active, rotateSecret } = req.body;
+    const data: any = {};
+    if (callback_url !== undefined) data.callback_url = String(callback_url);
+    if (currencies !== undefined) data.currencies = String(currencies);
+    if (active !== undefined) data.active = active ? 1 : 0;
+    if (rotateSecret) data.secret_key = newSecret();
+    try {
+        const operator = await prisma.operator.update({ where: { id }, data });
+        res.json({ operator });
+    } catch {
+        res.status(404).json({ error: 'Operator not found' });
+    }
+});
 
 // ─── Dashboard Stats ──────────────────────────────────────────────────────────
 router.get('/stats', async (_req, res: Response) => {

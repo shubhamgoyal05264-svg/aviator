@@ -1,10 +1,13 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { GameStatus, Bet, Round, User, CurrencyMode, Transaction } from './types';
-import { BETTING_DURATION, REFRESH_RATE, CRASH_TRANSITION_DURATION } from './constants';
+import { BETTING_DURATION, REFRESH_RATE } from './constants';
 import GameCanvas from './components/GameCanvas';
 import BetControl from './components/BetControl';
 import Sidebar from './components/Sidebar';
+import HistoryBar from './components/HistoryBar';
+import LoadingSplash from './components/LoadingSplash';
+import Avatar from './components/Avatar';
 import { AuthView } from './components/AuthView';
 import { WalletView } from './components/WalletView';
 import { HistoryView } from './components/HistoryView';
@@ -13,7 +16,6 @@ import { api } from './services/api';
 import { sound } from './services/sound';
 
 const App: React.FC = () => {
-  // ─── Auth State ──────────────────────────────────────────────────────────────
   const [user, setUser] = useState<User | null>(() => {
     const saved = localStorage.getItem('skyhigh_user');
     if (saved) {
@@ -22,15 +24,16 @@ const App: React.FC = () => {
         parsed.realBalance = Number(parsed.realBalance || 0);
         parsed.demoBalance = Number(parsed.demoBalance || 0);
         return parsed;
-      } catch { return null; }
+      } catch {
+        return null;
+      }
     }
     return null;
   });
-  const [currencyMode, setCurrencyMode] = useState<CurrencyMode>('DEMO');
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [view, setView] = useState<'GAME' | 'WALLET' | 'HISTORY' | 'PROFILE'>('GAME');
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [overlayView, setOverlayView] = useState<'WALLET' | 'HISTORY' | null>(null);
 
-  // ─── Game State (driven by socket events) ────────────────────────────────────
   const [status, setStatus] = useState<GameStatus>(GameStatus.BETTING);
   const [multiplier, setMultiplier] = useState(1.0);
   const [timeElapsed, setTimeElapsed] = useState(0);
@@ -38,58 +41,85 @@ const App: React.FC = () => {
   const [betSlotA, setBetSlotA] = useState<Bet | null>(null);
   const [betSlotB, setBetSlotB] = useState<Bet | null>(null);
   const [allBets, setAllBets] = useState<Bet[]>([]);
+  const [previousBets, setPreviousBets] = useState<Bet[]>([]);
+  const [topBets, setTopBets] = useState<Bet[]>([]);
   const [history, setHistory] = useState<number[]>([]);
 
   const bettingStartRef = useRef<number>(0);
   const flyingStartRef = useRef<number>(0);
   const timerRef = useRef<number | null>(null);
+  const allBetsRef = useRef<Bet[]>([]);
 
-  // ─── Persist user to localStorage ────────────────────────────────────────────
+  // Keep a live ref of the current round's bets for snapshotting
+  useEffect(() => {
+    allBetsRef.current = allBets;
+  }, [allBets]);
+
   useEffect(() => {
     if (user) localStorage.setItem('skyhigh_user', JSON.stringify(user));
   }, [user]);
 
-  // ─── Restore session on page load via /api/auth/me ───────────────────────────
   useEffect(() => {
     const token = localStorage.getItem('skyhigh_token');
     if (!token) return;
-    api.me().then(u => setUser(u)).catch(() => {
+    api.me().then((u) => setUser(u)).catch(() => {
       localStorage.removeItem('skyhigh_token');
       localStorage.removeItem('skyhigh_user');
     });
   }, []);
 
-  // ─── Socket.io Event Handlers ─────────────────────────────────────────────────
+  // Load transaction history when opening the wallet/history overlay
+  useEffect(() => {
+    if (!overlayView) return;
+    api.getTransactions()
+      .then((txs) =>
+        setTransactions(
+          txs.map((t: any) => ({
+            id: t.id,
+            type: t.type,
+            amount: Number(t.amount),
+            status: t.status,
+            method: t.method,
+            timestamp: t.timestamp,
+          }))
+        )
+      )
+      .catch(() => {});
+  }, [overlayView]);
+
   useEffect(() => {
     if (!user) return;
 
     const socket = getSocket();
 
-    // ── BETTING phase ────────────────────────────────────────────────────────
     socket.on('round:betting', (data: {
-      roundId: string; serverSeedHash: string; clientSeed: string;
-      nonce: number; bettingDuration: number; startTime: number;
+      roundId: string;
+      serverSeedHash: string;
+      clientSeed: string;
+      nonce: number;
+      bettingDuration: number;
+      startTime: number;
     }) => {
       setStatus(GameStatus.BETTING);
       setMultiplier(1.0);
       setTimeElapsed(0);
       setBetSlotA(null);
       setBetSlotB(null);
+      // Snapshot the round that just ended into "Previous" before clearing
+      if (allBetsRef.current.length > 0) setPreviousBets(allBetsRef.current);
       setAllBets([]);
-
       bettingStartRef.current = data.startTime;
 
       setActiveRound({
         id: data.roundId,
-        crashPoint: 0,          // unknown until crash
-        serverSeed: '',          // unknown until crash
+        crashPoint: 0,
+        serverSeed: '',
         serverSeedHash: data.serverSeedHash,
         clientSeed: data.clientSeed,
         nonce: data.nonce,
-        startTime: data.startTime
+        startTime: data.startTime,
       });
 
-      // Countdown timer during betting
       if (timerRef.current) clearInterval(timerRef.current);
       timerRef.current = window.setInterval(() => {
         const elapsed = Date.now() - data.startTime;
@@ -97,7 +127,6 @@ const App: React.FC = () => {
       }, REFRESH_RATE);
     });
 
-    // ── FLYING phase ─────────────────────────────────────────────────────────
     socket.on('round:flying', (data: { startTime: number }) => {
       if (timerRef.current) clearInterval(timerRef.current);
       flyingStartRef.current = data.startTime;
@@ -105,16 +134,19 @@ const App: React.FC = () => {
       sound.playFlying();
     });
 
-    // ── TICK (server sends mult every 100ms) ─────────────────────────────────
     socket.on('round:tick', (data: { multiplier: number; elapsed: number }) => {
       setMultiplier(data.multiplier);
       setTimeElapsed(data.elapsed);
     });
 
-    // ── CRASHED ──────────────────────────────────────────────────────────────
     socket.on('round:crashed', (data: {
-      roundId: string; crashPoint: number; serverSeed: string;
-      serverSeedHash: string; clientSeed: string; nonce: number; crashedAt: number;
+      roundId: string;
+      crashPoint: number;
+      serverSeed: string;
+      serverSeedHash: string;
+      clientSeed: string;
+      nonce: number;
+      crashedAt: number;
     }) => {
       if (timerRef.current) clearInterval(timerRef.current);
       sound.stopFlying();
@@ -122,47 +154,74 @@ const App: React.FC = () => {
       setStatus(GameStatus.CRASHED);
       setMultiplier(data.crashPoint);
 
-      setActiveRound(prev => prev ? {
-        ...prev,
-        crashPoint: data.crashPoint,
-        serverSeed: data.serverSeed,
-      } : null);
+      setActiveRound((prev) =>
+        prev
+          ? { ...prev, crashPoint: data.crashPoint, serverSeed: data.serverSeed }
+          : null
+      );
 
-      setHistory(prev => {
-        const next = [data.crashPoint, ...prev];
-        return next;
-      });
+      setHistory((prev) => [data.crashPoint, ...prev]);
 
-      // Refresh balance from server after round
-      api.me().then(freshUser => setUser(freshUser)).catch(() => { });
+      // Feed this round's winners into the "Top" tab (highest multipliers)
+      const winners = allBetsRef.current.filter((b) => b.cashoutAmount && b.multiplier);
+      if (winners.length > 0) {
+        setTopBets((prev) => {
+          const seen = new Set<string>();
+          return [...winners, ...prev]
+            .filter((b) => (seen.has(b.id) ? false : seen.add(b.id)))
+            .sort((a, b) => (b.multiplier || 0) - (a.multiplier || 0))
+            .slice(0, 50);
+        });
+      }
+
+      api.me().then((freshUser) => setUser(freshUser)).catch(() => {});
     });
 
-    // ── Bet placed by anyone ──────────────────────────────────────────────────
-    socket.on('bet:placed', (bet: any) => {
+    socket.on('bet:placed', (bet: {
+      id: string;
+      user: string;
+      slot?: 'A' | 'B';
+      amount: number;
+      currency?: CurrencyMode;
+      isBot?: boolean;
+    }) => {
+      const isMine = !bet.isBot && bet.user === user.username;
       const newBet: Bet = {
         id: bet.id,
-        userId: bet.isBot ? `bot-${bet.id}` : user.id,
-        user: bet.user,
+        userId: isMine ? user.id : bet.isBot ? `bot-${bet.id}` : '',
+        user: isMine ? 'You' : bet.user,
         amount: bet.amount,
         currency: bet.currency || 'REAL',
-        isBot: bet.isBot,
-        timestamp: Date.now()
+        isBot: !!bet.isBot,
+        timestamp: Date.now(),
       };
-      setAllBets(prev => [newBet, ...prev]);
+      setAllBets((prev) => [newBet, ...prev]);
+
+      // Sync the optimistic slot to the server's real bet id so cashout matches
+      if (isMine && bet.slot) {
+        const syncId = (prev: Bet | null) =>
+          prev && prev.cashoutAmount === undefined ? { ...prev, id: bet.id } : prev;
+        if (bet.slot === 'A') setBetSlotA(syncId);
+        else setBetSlotB(syncId);
+      }
     });
 
-    // ── Cashout confirmed by server ────────────────────────────────────────────
     socket.on('bet:cashedout', (data: {
-      betId: string; user: string; slot: string;
-      multiplier: number; cashoutAmount: number; isBot?: boolean;
+      betId: string;
+      user: string;
+      slot: string;
+      multiplier: number;
+      cashoutAmount: number;
+      isBot?: boolean;
     }) => {
-      setAllBets(prev => prev.map(b =>
-        b.id === data.betId
-          ? { ...b, cashoutAmount: data.cashoutAmount, multiplier: data.multiplier }
-          : b
-      ));
+      setAllBets((prev) =>
+        prev.map((b) =>
+          b.id === data.betId
+            ? { ...b, cashoutAmount: data.cashoutAmount, multiplier: data.multiplier }
+            : b
+        )
+      );
 
-      // Update our own slots
       if (!data.isBot) {
         const updateSlot = (prev: Bet | null) =>
           prev && prev.id === data.betId
@@ -173,21 +232,44 @@ const App: React.FC = () => {
       }
     });
 
-    // ── Current state on connect (if rejoining mid-round) ─────────────────────
-    socket.on('round:state', (data: any) => {
+    socket.on('round:state', (data: {
+      phase?: string;
+      startTime?: number;
+      bets?: Array<{
+        id: string;
+        userId?: string;
+        user: string;
+        amount: number;
+        currency?: string;
+        isBot?: boolean;
+      }>;
+    }) => {
       if (data.phase === 'FLYING') {
         setStatus(GameStatus.FLYING);
         flyingStartRef.current = data.startTime || Date.now();
-        // optionally play flying sound if rejoining mid-flight, but requires user interaction first
       } else if (data.phase === 'BETTING') {
         setStatus(GameStatus.BETTING);
       }
       if (data.bets) {
-        setAllBets(data.bets.map((b: any) => ({
-          id: b.id, userId: b.userId || '', user: b.user, amount: b.amount,
-          currency: b.currency || 'REAL', isBot: !!b.isBot, timestamp: Date.now()
-        })));
+        setAllBets(
+          data.bets.map((b) => ({
+            id: b.id,
+            userId: b.userId || '',
+            user: b.user,
+            amount: b.amount,
+            currency: b.currency || 'REAL',
+            isBot: !!b.isBot,
+            timestamp: Date.now(),
+          }))
+        );
       }
+    });
+
+    // Server rejected an action (e.g. insufficient balance) — roll back optimism
+    socket.on('error', () => {
+      setBetSlotA((prev) => (prev?.id.startsWith('pending-') ? null : prev));
+      setBetSlotB((prev) => (prev?.id.startsWith('pending-') ? null : prev));
+      api.me().then((freshUser) => setUser(freshUser)).catch(() => {});
     });
 
     return () => {
@@ -198,171 +280,231 @@ const App: React.FC = () => {
       socket.off('bet:placed');
       socket.off('bet:cashedout');
       socket.off('round:state');
+      socket.off('error');
       if (timerRef.current) clearInterval(timerRef.current);
     };
   }, [user]);
 
-  // ─── Place Bet ────────────────────────────────────────────────────────────────
   const placeBet = (slot: 'A' | 'B', amount: number, autoCashout?: number) => {
     if (!user || status !== GameStatus.BETTING) return;
-    const balanceKey = currencyMode === 'REAL' ? 'realBalance' : 'demoBalance';
-    if (amount > user[balanceKey] || amount <= 0) return;
+    if (amount > user.realBalance || amount <= 0) return;
 
     const socket = getSocket();
-    socket.emit('bet:place', { slot, amount, currency: currencyMode, autoCashout });
-    
+    socket.emit('bet:place', { slot, amount, currency: 'REAL', autoCashout });
     sound.playBet();
 
-    // Optimistically show the bet in our slot
     const optimisticBet: Bet = {
       id: `pending-${slot}-${Date.now()}`,
       userId: user.id,
       user: 'You',
       amount,
-      currency: currencyMode,
+      currency: 'REAL',
       autoCashout,
       isBot: false,
-      timestamp: Date.now()
+      timestamp: Date.now(),
     };
     if (slot === 'A') setBetSlotA(optimisticBet);
     else setBetSlotB(optimisticBet);
 
-    // Optimistically deduct balance
-    setUser(u => u ? { ...u, [balanceKey]: u[balanceKey] - amount } : null);
+    setUser((u) => (u ? { ...u, realBalance: u.realBalance - amount } : null));
   };
 
-  // ─── Cashout ─────────────────────────────────────────────────────────────────
-  const handleCashout = useCallback((slot: 'A' | 'B') => {
-    if (status !== GameStatus.FLYING) return;
-    const socket = getSocket();
-    socket.emit('bet:cashout', { slot });
+  const handleCashout = useCallback(
+    (slot: 'A' | 'B') => {
+      if (status !== GameStatus.FLYING) return;
+      const socket = getSocket();
+      socket.emit('bet:cashout', { slot });
 
-    // Optimistically disable the cashout button
-    const optimisticCashout = (prev: Bet | null) =>
-      prev ? { ...prev, cashoutAmount: (prev.amount * multiplier) } : prev;
+      const optimisticCashout = (prev: Bet | null) =>
+        prev ? { ...prev, cashoutAmount: prev.amount * multiplier } : prev;
 
-    if (slot === 'A') setBetSlotA(optimisticCashout);
-    else setBetSlotB(optimisticCashout);
-  }, [status, multiplier]);
+      if (slot === 'A') setBetSlotA(optimisticCashout);
+      else setBetSlotB(optimisticCashout);
+    },
+    [status, multiplier]
+  );
 
-  // ─── Logout ──────────────────────────────────────────────────────────────────
   const handleLogout = () => {
     disconnectSocket();
     localStorage.removeItem('skyhigh_token');
     localStorage.removeItem('skyhigh_user');
     setUser(null);
+    setMenuOpen(false);
+    setOverlayView(null);
   };
 
-  // ─── Login handler ────────────────────────────────────────────────────────────
   const handleLogin = (newUser: User, _token: string) => {
     setUser(newUser);
   };
 
   if (!user) return <AuthView onLogin={handleLogin} />;
 
-  const currentBalance = currencyMode === 'REAL' ? user.realBalance : user.demoBalance;
+  const currentBalance = user.realBalance;
 
   return (
-    <div className="flex h-screen bg-[#0d0d0d] text-white overflow-hidden font-inter">
-      <nav className="w-20 bg-[#141516] border-r border-white/5 flex flex-col items-center py-6 gap-8">
-        <div className="text-aviator-red font-black italic text-xl">SH</div>
-        <button onClick={() => setView('GAME')} className={`p-3 rounded-xl transition-all ${view === 'GAME' ? 'bg-aviator-red text-white shadow-lg shadow-red-500/20' : 'text-gray-500 hover:text-white'}`}>
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-        </button>
-        <button onClick={() => setView('WALLET')} className={`p-3 rounded-xl transition-all ${view === 'WALLET' ? 'bg-aviator-red text-white shadow-lg shadow-red-500/20' : 'text-gray-500 hover:text-white'}`}>
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-        </button>
-        <button onClick={() => setView('HISTORY')} className={`p-3 rounded-xl transition-all ${view === 'HISTORY' ? 'bg-aviator-red text-white shadow-lg shadow-red-500/20' : 'text-gray-500 hover:text-white'}`}>
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-        </button>
-        <div className="mt-auto">
-          <button onClick={handleLogout} className="p-3 text-gray-600 hover:text-red-500 transition-colors">
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
-          </button>
+    <div className="app-shell flex flex-col h-dvh max-h-dvh w-full bg-[#0b0e11] text-white overflow-hidden font-inter">
+      <header className="h-11 sm:h-12 flex-shrink-0 flex items-center justify-between px-3 sm:px-4 bg-[#141516] border-b border-[#2d2d2d] z-20">
+        <div className="flex items-center gap-4">
+          <span className="aviator-logo">Aviator</span>
+          <span className="hidden sm:inline text-[10px] text-gray-600 font-bold uppercase tracking-widest">
+            Provably Fair
+          </span>
         </div>
-      </nav>
 
-      <div className="flex-1 flex flex-col relative">
-        <header className="h-16 border-b border-white/5 flex items-center justify-between px-6 bg-[#0d0d0d]/80 backdrop-blur-md z-10">
-          <div className="flex items-center gap-6">
-            <div className="flex flex-col">
-              <span className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Active Pilot</span>
-              <span className="text-sm font-bold">{user.username}</span>
-            </div>
-            <div className="h-8 w-px bg-white/5" />
-            <div className="flex items-center gap-3 bg-[#1b1c1d] px-4 py-1.5 rounded-full border border-white/5">
-              <span className={`text-[10px] font-black px-2 py-0.5 rounded ${currencyMode === 'REAL' ? 'bg-green-500/20 text-green-500' : 'bg-blue-500/20 text-blue-500'}`}>{currencyMode}</span>
-              <span className="text-yellow-400 font-black tabular-nums font-mono">${currentBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-              <button onClick={() => setCurrencyMode(m => m === 'REAL' ? 'DEMO' : 'REAL')} className="text-gray-500 hover:text-white transition-transform active:rotate-180">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg>
-              </button>
-            </div>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 bg-[#1b1c1d] border border-[#2d2d2d] rounded-full px-3 py-1">
+            <svg className="w-4 h-4 text-[#28d017]" fill="currentColor" viewBox="0 0 20 20">
+              <path d="M8.433 7.418c.155-.103.346-.196.567-.267v1.698a2.305 2.305 0 01-.567-.267C8.07 8.34 8 8.114 8 8c0-.114.07-.34.433-.582zM11 12.849v-1.698c.22.071.412.164.567.267.364.243.433.468.433.582 0 .114-.07.34-.433.582a2.305 2.305 0 01-.567.267z" />
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-13a1 1 0 10-2 0v.092a4.535 4.535 0 00-1.676.662C6.602 6.234 6 7.009 6 8c0 .99.602 1.765 1.324 2.246.48.32 1.054.545 1.676.662v1.941c-.391-.127-.68-.317-.843-.504a1 1 0 10-1.51 1.31c.562.649 1.413 1.076 2.353 1.253V15a1 1 0 102 0v-.092a4.535 4.535 0 001.676-.662C13.398 13.766 14 12.991 14 12c0-.99-.602-1.765-1.324-2.246A4.535 4.535 0 0011 9.092V7.151c.391.127.68.317.843.504a1 1 0 101.511-1.31c-.563-.649-1.413-1.076-2.354-1.253V5z" clipRule="evenodd" />
+            </svg>
+            <span className="text-sm font-black tabular-nums text-[#28d017]">
+              {currentBalance.toFixed(2)}
+            </span>
+            <span className="text-[10px] text-gray-500 font-bold">USD</span>
           </div>
-          <div className="flex items-center gap-4">
-            <button onClick={() => setView('WALLET')} className="bg-aviator-red text-white px-5 py-2 rounded-lg font-bold text-sm hover:scale-105 active:scale-95 transition-all shadow-[0_4px_15px_rgba(229,30,37,0.4)]">DEPOSIT</button>
+
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setMenuOpen((o) => !o)}
+              className="p-2 rounded-lg hover:bg-[#2d2d2d] transition-colors"
+              aria-label="Menu"
+            >
+              <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+
+            {menuOpen && (
+              <>
+                <div className="fixed inset-0 z-30" onClick={() => setMenuOpen(false)} />
+                <div className="absolute right-0 top-full mt-1 w-48 bg-[#1b1c1d] border border-[#2d2d2d] rounded-lg shadow-xl z-40 py-1">
+                  <p className="px-3 py-2 text-[10px] text-gray-500 font-bold truncate border-b border-[#2d2d2d]">
+                    {user.username}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => { setOverlayView('WALLET'); setMenuOpen(false); }}
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-[#2d2d2d] transition-colors"
+                  >
+                    Wallet / Deposit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setOverlayView('HISTORY'); setMenuOpen(false); }}
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-[#2d2d2d] transition-colors"
+                  >
+                    History
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    className="w-full text-left px-3 py-2 text-sm text-red-400 hover:bg-[#2d2d2d] transition-colors border-t border-[#2d2d2d]"
+                  >
+                    Log out
+                  </button>
+                </div>
+              </>
+            )}
           </div>
-        </header>
+        </div>
+      </header>
 
-        <main className="flex-1 p-6 flex flex-col gap-6 overflow-y-auto">
-          {view === 'GAME' && (
-            <>
-              <div className="flex-1 min-h-[350px] relative rounded-3xl overflow-hidden border border-white/5 shadow-2xl bg-black">
-                <GameCanvas status={status} multiplier={multiplier} timeElapsed={timeElapsed} />
-                {status === GameStatus.BETTING && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-black/40 backdrop-blur-sm pointer-events-none">
-                    <div className="text-center animate-pulse">
-                      <p className="text-gray-400 text-xs font-black tracking-[0.3em] mb-2 uppercase">Awaiting Flight</p>
-                      <p className="text-7xl font-black italic tabular-nums">
-                        {Math.max(0, Math.ceil((BETTING_DURATION - timeElapsed) / 1000))}s
-                      </p>
-                    </div>
-                  </div>
-                )}
+      <div className="flex flex-1 min-h-0 flex-col lg:flex-row overflow-hidden">
+        <Sidebar
+          allBets={allBets}
+          previousBets={previousBets}
+          topBets={topBets}
+          liveCount={allBets.length}
+        />
+
+        <main className="game-main flex flex-1 flex-col min-w-0 min-h-0 order-1 lg:order-2 overflow-hidden">
+          <HistoryBar history={history} />
+
+          <section className="game-stage relative flex-1 min-h-0 bg-[#0b0e11] overflow-hidden">
+            <GameCanvas status={status} multiplier={multiplier} timeElapsed={timeElapsed} />
+            {status === GameStatus.BETTING && (
+              <LoadingSplash progress={timeElapsed / BETTING_DURATION} />
+            )}
+
+            <button
+              type="button"
+              className="absolute top-2 right-2 z-10 w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-[#2d2d2d]/85 backdrop-blur flex items-center justify-center text-[#ffd400] hover:bg-[#3d3d3d]/90 transition-colors"
+              aria-label="Effects"
+            >
+              <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M12 2l1.6 6.4L20 10l-6.4 1.6L12 18l-1.6-6.4L4 10l6.4-1.6L12 2z" />
+              </svg>
+            </button>
+
+            <div className="absolute bottom-2 right-2 z-10 flex items-center gap-1.5 bg-black/45 rounded-full pl-1 pr-2.5 py-0.5 backdrop-blur pointer-events-none">
+              <div className="flex -space-x-1.5">
+                {allBets.slice(0, 3).map((b) => (
+                  <Avatar key={b.id} name={b.user} size={20} className="border border-black/40" />
+                ))}
               </div>
+              <span className="text-[11px] font-bold text-gray-200 tabular-nums">
+                {allBets.length}
+              </span>
+            </div>
+          </section>
 
-              <div className="flex flex-col lg:flex-row gap-6 items-stretch">
-                <div className="flex-1 flex flex-col md:flex-row gap-4">
-                  <BetControl
-                    balance={currentBalance}
-                    onBet={(amt, ac) => placeBet('A', amt, ac)}
-                    onCashout={() => handleCashout('A')}
-                    isFlying={status === GameStatus.FLYING}
-                    activeBet={betSlotA || undefined}
-                    currentMultiplier={multiplier}
-                    isBettingPhase={status === GameStatus.BETTING}
-                  />
-                  <BetControl
-                    balance={currentBalance}
-                    onBet={(amt, ac) => placeBet('B', amt, ac)}
-                    onCashout={() => handleCashout('B')}
-                    isFlying={status === GameStatus.FLYING}
-                    activeBet={betSlotB || undefined}
-                    currentMultiplier={multiplier}
-                    isBettingPhase={status === GameStatus.BETTING}
-                  />
-                </div>
-                <div className="w-full lg:w-72 bg-[#141516] rounded-2xl p-4 border border-white/5 flex flex-col max-h-[300px] lg:max-h-none overflow-hidden">
-                  <p className="text-[10px] text-gray-500 font-black mb-4 uppercase tracking-widest">Global Terminal</p>
-                  <div className="space-y-2 overflow-y-auto scrollbar-hide pr-1">
-                    {allBets.slice(0, 12).map(b => (
-                      <div key={b.id} className={`flex justify-between items-center text-xs p-2 rounded border border-white/5 transition-colors ${b.cashoutAmount ? 'bg-green-500/10 border-green-500/20' : 'bg-[#0d0d0d]'}`}>
-                        <span className={`${b.user === 'You' ? 'text-aviator-red font-black' : 'text-gray-400'}`}>{b.user}</span>
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono text-yellow-500">${b.amount}</span>
-                          {b.cashoutAmount && <span className="text-green-500 font-bold">x{b.multiplier?.toFixed(2)}</span>}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </>
-          )}
-
-          {view === 'WALLET' && <WalletView user={user} onUpdateUser={setUser} onAddTransaction={(t) => setTransactions(p => [t, ...p])} />}
-          {view === 'HISTORY' && <HistoryView transactions={transactions} gameHistory={history} />}
+          <div className="bet-panels flex-shrink-0 grid grid-cols-1 sm:grid-cols-2 gap-2 p-2 bg-[#141516] border-t border-[#2d2d2d] safe-area-pb">
+            <BetControl
+              balance={currentBalance}
+              onBet={(amt, ac) => placeBet('A', amt, ac)}
+              onCashout={() => handleCashout('A')}
+              isFlying={status === GameStatus.FLYING}
+              activeBet={betSlotA || undefined}
+              currentMultiplier={multiplier}
+              isBettingPhase={status === GameStatus.BETTING}
+            />
+            <BetControl
+              balance={currentBalance}
+              onBet={(amt, ac) => placeBet('B', amt, ac)}
+              onCashout={() => handleCashout('B')}
+              isFlying={status === GameStatus.FLYING}
+              activeBet={betSlotB || undefined}
+              currentMultiplier={multiplier}
+              isBettingPhase={status === GameStatus.BETTING}
+            />
+          </div>
         </main>
       </div>
+
+      {/* Wallet / History overlay */}
+      {overlayView && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="bg-[#141516] border border-[#2d2d2d] rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-[#2d2d2d] sticky top-0 bg-[#141516]">
+              <h2 className="font-black text-lg">
+                {overlayView === 'WALLET' ? 'Wallet' : 'History'}
+              </h2>
+              <button
+                type="button"
+                onClick={() => setOverlayView(null)}
+                className="p-1.5 rounded-lg hover:bg-[#2d2d2d] text-gray-400"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="p-5">
+              {overlayView === 'WALLET' && (
+                <WalletView
+                  user={user}
+                  onUpdateUser={setUser}
+                  onAddTransaction={(t) => setTransactions((p) => [t, ...p])}
+                />
+              )}
+              {overlayView === 'HISTORY' && (
+                <HistoryView transactions={transactions} gameHistory={history} />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
