@@ -1,5 +1,8 @@
 # VPS Production Deploy Guide
 
+> **Beginner + aaPanel + baajilive.com?**  
+> 👉 Read **`deploy/BAAJILIVE-AAPANEL-GUIDE.md`** — scratch se har step detail mein.
+
 ## Requirements
 
 - Ubuntu 22.04 VPS (min 2 GB RAM)
