@@ -31,7 +31,11 @@ export const AuthView: React.FC<Props> = ({ onLogin }) => {
       // Reconnect socket with the new token
       reconnectSocket();
 
-      onLogin(result.user, result.token);
+      onLogin({
+        ...result.user,
+        realBalance: Number(result.user.realBalance ?? 0),
+        demoBalance: Number(result.user.demoBalance ?? 0),
+      }, result.token);
     } catch (err: any) {
       setError(err.message || 'Something went wrong');
     } finally {

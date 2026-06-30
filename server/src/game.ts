@@ -55,7 +55,10 @@ export class GameEngine {
     }
 
     start() {
-        this.initRound();
+        this.initRound().catch((err) => {
+            console.error('[GameEngine] initRound failed, retrying in 5s:', err.message);
+            setTimeout(() => this.start(), 5000);
+        });
     }
 
     handleConnection(socket: Socket) {
@@ -326,7 +329,9 @@ export class GameEngine {
             }
         }
 
-        setTimeout(() => this.initRound(), gameConfig.crashTransition);
+        setTimeout(() => {
+            this.initRound().catch((err) => console.error('[GameEngine] next round failed:', err.message));
+        }, gameConfig.crashTransition);
     }
 
     private spawnBots() {

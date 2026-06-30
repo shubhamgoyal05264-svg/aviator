@@ -1,6 +1,5 @@
 import 'dotenv/config';
 import express from 'express';
-import cors from 'cors';
 import http from 'http';
 import { Server as IOServer } from 'socket.io';
 import { prisma } from './prisma';
@@ -9,6 +8,7 @@ import walletRouter from './wallet';
 import adminRouter from './admin';
 import providerRouter from './provider/launch';
 import { GameEngine } from './game';
+import { corsMiddleware, corsOptions } from './cors';
 
 async function main() {
     console.log('✅ DB Connected via Prisma');
@@ -16,8 +16,8 @@ async function main() {
     const app = express();
     const server = http.createServer(app);
 
-    // Allow any origin in development (covers localhost, LAN IPs, and any port)
-    app.use(cors({ origin: true, credentials: true }));
+    app.use(corsMiddleware);
+    app.options('*', corsMiddleware);
     app.use(express.json());
 
     app.use('/api/auth', authRouter);
@@ -27,7 +27,12 @@ async function main() {
     app.get('/api/health', (_req, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
 
     let ioOptions: ConstructorParameters<typeof IOServer>[1] = {
-        cors: { origin: true, methods: ['GET', 'POST'], credentials: true },
+        cors: {
+            origin: corsOptions.origin,
+            methods: ['GET', 'POST'],
+            credentials: true,
+            allowedHeaders: corsOptions.allowedHeaders,
+        },
     };
 
     const redisUrl = process.env.REDIS_URL;

@@ -1,13 +1,13 @@
 import { io, Socket } from 'socket.io-client';
 
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:3001';
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL ?? (import.meta.env.PROD ? '' : 'http://localhost:3001');
 
 let socket: Socket | null = null;
 
 export function getSocket(): Socket {
     if (!socket) {
         const token = localStorage.getItem('skyhigh_token');
-        socket = io(SOCKET_URL, {
+        socket = io(SOCKET_URL || undefined, {
             auth: { token },
             transports: ['websocket'],
             reconnection: true,

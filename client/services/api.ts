@@ -1,7 +1,7 @@
 /**
  * Frontend API service — wraps fetch with base URL and JWT injection.
  */
-const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+const BASE_URL = import.meta.env.VITE_API_URL ?? (import.meta.env.PROD ? '' : 'http://localhost:3001');
 
 function getToken(): string | null {
     return localStorage.getItem('skyhigh_token');
