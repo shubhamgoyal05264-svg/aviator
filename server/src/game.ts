@@ -184,7 +184,7 @@ export class GameEngine {
         (async () => {
             try {
                 const { balance } = await wallet.credit(
-                    { id: userId, operator_id: bet.operatorId, external_player_id: bet.externalPlayerId },
+                    { id: userId, operator_id: bet.operatorId ?? null, external_player_id: bet.externalPlayerId ?? null },
                     winAmount,
                     { roundId: this.round!.id, txId: uuidv4(), refTxId: bet.id, currency: bet.currency }
                 );
